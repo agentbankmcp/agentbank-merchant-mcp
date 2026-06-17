@@ -1,0 +1,45 @@
+{
+  "name": "@curless/agentbank-merchant-mcp",
+  "version": "0.0.5",
+  "description": "Merchant-side MCP server for agentbank — read your orders + live Curless wallet balance from Claude, authenticated by your Curless API key via env (no OAuth).",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "agentbank-merchant-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "build:mcpb": "node build-mcpb.mjs && mcpb pack mcpb agentbank-merchant.mcpb",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  },
+  "devDependencies": {
+    "@anthropic-ai/mcpb": "^2.1.2",
+    "@types/node": "^22.10.1",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": ["mcp", "agentbank", "merchant", "claude", "curless"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentbankmcp/agentbank-merchant-mcp.git"
+  },
+  "homepage": "https://github.com/agentbankmcp/agentbank-merchant-mcp",
+  "bugs": {
+    "url": "https://github.com/agentbankmcp/agentbank-merchant-mcp/issues"
+  },
+  "author": "robin"
+}

@@ -1,0 +1,6 @@
+node_modules/
+dist/
+
+# Build artifacts of the .mcpb desktop extension (regenerate via `npm run build:mcpb`).
+mcpb/server/
+*.mcpb

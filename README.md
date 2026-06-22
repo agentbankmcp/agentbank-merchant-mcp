@@ -16,6 +16,7 @@ personas don't share a tool surface.
 
 - **`list_orders`** — this merchant's orders (what agents have paid), newest first.
 - **`get_balance`** — the live Curless wallet balance per currency (available / frozen).
+- **`get_order`** — one order in full: line items + the card it was paid with.
 
 ## Install (Claude Desktop)
 

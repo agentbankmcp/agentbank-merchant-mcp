@@ -46,6 +46,27 @@ type OrdersResponse = { data: Order[]; pagination?: { count?: number } };
 // no longer surface our own ledger-derived balance.
 type BalanceResponse = { mode: string; curlessWallet: WalletLine[] | null };
 
+type PaymentMethod = {
+  type?: string;
+  brand?: string | null;
+  last4?: string | null;
+  funding?: string | null;
+  wallet?: string | null;
+  provider?: string | null;
+  reference?: string | null;
+};
+type OrderDetail = Order & {
+  protocol?: string;
+  rail?: string | null;
+  paymentMethod?: PaymentMethod | null;
+};
+type OrderDetailResponse = {
+  merchantId: string;
+  mode: string;
+  order: OrderDetail;
+  payment: PaymentMethod | null;
+};
+
 // Minor-unit integer → exact decimal string (no currency suffix), per currency.
 const DECIMALS: Record<string, number> = { USD: 2, EUR: 2, USDC: 6, USDT: 6, EURC: 6 };
 const fmt = (minor: number, currency: string): string => {
@@ -97,6 +118,44 @@ const walletMarkdown = (merchantId: string, mode: string, wallet: WalletLine[]):
   ].join('\n');
 };
 
+const orderDetailMarkdown = (r: OrderDetailResponse): string => {
+  const o = r.order;
+  const pm = r.payment ?? o.paymentMethod ?? null;
+  const li = Array.isArray(o.lineItems)
+    ? (o.lineItems as { name?: string; quantity?: number; unitPrice?: number }[])
+    : [];
+  const items = li.length
+    ? li
+        .map(
+          (x) =>
+            `- ${cell(x.name ?? '')}${(x.quantity ?? 1) > 1 ? ` ×${x.quantity}` : ''} — ${fmt((x.unitPrice ?? 0) * (x.quantity ?? 1), o.currency)} ${o.currency}`,
+        )
+        .join('\n')
+    : '- (no items)';
+  const cardText = pm
+    ? [pm.brand, pm.last4 ? `····${pm.last4}` : '', pm.wallet ? `(${pm.wallet})` : '']
+        .filter(Boolean)
+        .join(' ')
+    : '—';
+  const source = [o.protocol ? o.protocol.toUpperCase() : '', o.rail ?? pm?.provider]
+    .filter(Boolean)
+    .join(' · ');
+  return [
+    `**Order \`${o.id}\`** — ${fmt(o.amount, o.currency)} ${o.currency} · ${o.status ?? ''}`,
+    o.createdAt ? fmtDate(o.createdAt) : '',
+    '',
+    '**Items**',
+    items,
+    '',
+    '**Payment**',
+    `- Card: ${cell(cardText)}`,
+    source ? `- Source: ${cell(source)}` : '',
+    pm?.reference ? `- Reference: \`${cell(String(pm.reference))}\`` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+};
+
 const api = async <T>(path: string): Promise<T> => {
   if (!TOKEN) throw new Error('set AGENTBANK_MERCHANT_TOKEN (your Curless API key)');
   if (!MERCHANT) throw new Error('set AGENTBANK_MERCHANT_ID (e.g. 429488)');
@@ -138,6 +197,17 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
     _meta: UI_META,
   },
+  {
+    name: 'get_order',
+    description:
+      "One order's full detail — line items + the card it was paid with. Pass the order id from list_orders.",
+    inputSchema: {
+      type: 'object',
+      properties: { orderId: { type: 'string', description: 'the order id, e.g. ord_…' } },
+      required: ['orderId'],
+    },
+    _meta: UI_META,
+  },
 ];
 
 // Tool result that links the card: `structuredContent` feeds the widget, the
@@ -149,7 +219,7 @@ const card = (markdown: string, structured: Record<string, unknown>) => ({
 });
 
 const server = new Server(
-  { name: 'agentbank-merchant', version: '0.0.6' },
+  { name: 'agentbank-merchant', version: '0.0.14' },
   { capabilities: { tools: {}, resources: {} } },
 );
 
@@ -191,6 +261,20 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           available: x.available,
           frozen: x.frozen,
         })),
+      });
+    }
+
+    if (req.params.name === 'get_order') {
+      const orderId = String(args.orderId ?? '');
+      if (!orderId) throw new Error('orderId is required');
+      // Forwards to the merchant-kit detail endpoint; the card renders instantly
+      // from list_orders data and uses this only to enrich (e.g. the Stripe card).
+      const r = await api<OrderDetailResponse>(mPath(`/orders/${encodeURIComponent(orderId)}`));
+      return card(orderDetailMarkdown(r), {
+        merchantId: MERCHANT,
+        mode: r.mode,
+        order: r.order,
+        payment: r.payment,
       });
     }
 

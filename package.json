@@ -1,6 +1,6 @@
 {
   "name": "@curless/agentbank-merchant-mcp",
-  "version": "0.0.18",
+  "version": "0.0.19",
   "description": "Merchant-side MCP server for agentbank — read your orders + live Curless wallet balance from Claude, authenticated by your Curless API key via env (no OAuth).",
   "license": "MIT",
   "type": "module",

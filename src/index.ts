@@ -173,7 +173,7 @@ const mPath = (suffix: string) => `/v1/merchant/${encodeURIComponent(MERCHANT ??
 // MCP Apps card (a ui:// resource). Tools link to it via _meta.ui.resourceUri;
 // a UI-capable host (Claude Desktop) renders it as a widget, others fall back to
 // the text content. Same card the remote /mcp kit uses (built in apps/api/mcp-ui).
-const CARD_URI = 'ui://agentbank-merchant/card-v11.html';
+const CARD_URI = 'ui://agentbank-merchant/card-v12.html';
 const CARD_MIME = 'text/html;profile=mcp-app';
 const UI_META = { ui: { resourceUri: CARD_URI }, 'ui/resourceUri': CARD_URI };
 
@@ -219,7 +219,7 @@ const card = (markdown: string, structured: Record<string, unknown>) => ({
 });
 
 const server = new Server(
-  { name: 'agentbank-merchant', version: '0.0.17' },
+  { name: 'agentbank-merchant', version: '0.0.18' },
   { capabilities: { tools: {}, resources: {} } },
 );
 

@@ -206,7 +206,7 @@ const summaryMarkdown = (merchantId: string, s: SummaryResponse): string => {
 // MCP Apps card (a ui:// resource). Tools link to it via _meta.ui.resourceUri;
 // a UI-capable host (Claude Desktop) renders it as a widget, others fall back to
 // the text content. Same card the remote /mcp kit uses (built in apps/api/mcp-ui).
-const CARD_URI = 'ui://agentbank-merchant/card-v14.html';
+const CARD_URI = 'ui://agentbank-merchant/card-v15.html';
 const CARD_MIME = 'text/html;profile=mcp-app';
 const UI_META = { ui: { resourceUri: CARD_URI }, 'ui/resourceUri': CARD_URI };
 
@@ -247,6 +247,7 @@ const TOOLS = [
         to: { type: 'string', description: 'ISO timestamp upper bound' },
       },
     },
+    _meta: UI_META,
   },
   {
     name: 'get_balance',
@@ -276,7 +277,7 @@ const card = (markdown: string, structured: Record<string, unknown>) => ({
 });
 
 const server = new Server(
-  { name: 'agentbank-merchant', version: '0.0.21' },
+  { name: 'agentbank-merchant', version: '0.0.22' },
   { capabilities: { tools: {}, resources: {} } },
 );
 
@@ -310,11 +311,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (req.params.name === 'get_summary') {
       const q = orderQuery(args);
       const s = await api<SummaryResponse>(mPath(`/summary${q ? `?${q}` : ''}`));
-      // Markdown-only (no card): the roll-up isn't an order list the card renders.
-      return {
-        content: [{ type: 'text' as const, text: summaryMarkdown(MERCHANT ?? '', s) }],
-        structuredContent: { merchantId: MERCHANT, mode: s.mode, summary: s },
-      };
+      // The card renders this as a roll-up (big count + gross by currency +
+      // status/protocol chips); markdown is the fallback for card-less hosts.
+      return card(summaryMarkdown(MERCHANT ?? '', s), {
+        merchantId: MERCHANT,
+        mode: s.mode,
+        summary: s,
+      });
     }
 
     if (req.params.name === 'get_balance') {

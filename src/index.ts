@@ -41,7 +41,14 @@ type Order = {
   lineItems?: unknown;
 };
 type WalletLine = { currency: string; available: number; frozen: number; channel?: string | null };
-type OrdersResponse = { data: Order[]; pagination?: { count?: number } };
+type OrdersResponse = { data: Order[]; pagination?: { count?: number; total?: number } };
+type SummaryResponse = {
+  mode: string;
+  count: number;
+  byCurrency: Array<{ currency: string; count: number; totalAmount: number }>;
+  byProtocol: Array<{ protocol: string; count: number }>;
+  byStatus: Array<{ status: string; count: number }>;
+};
 // Balance = the live Curless wallet (Curless holds the money + reports it). We
 // no longer surface our own ledger-derived balance.
 type BalanceResponse = { mode: string; curlessWallet: WalletLine[] | null };
@@ -170,6 +177,32 @@ const api = async <T>(path: string): Promise<T> => {
 
 const mPath = (suffix: string) => `/v1/merchant/${encodeURIComponent(MERCHANT ?? '')}${suffix}`;
 
+// Build the optional order-filter query string (status/protocol/currency/date)
+// from a tool's args — forwarded verbatim to the gateway, which validates.
+const orderQuery = (args: Record<string, unknown>): string => {
+  const p = new URLSearchParams();
+  for (const k of ['status', 'protocol', 'currency', 'from', 'to']) {
+    const v = args[k];
+    if (typeof v === 'string' && v) p.set(k, v);
+  }
+  return p.toString();
+};
+
+const summaryMarkdown = (merchantId: string, s: SummaryResponse): string => {
+  if (s.count === 0) return `**${cell(merchantId)}** — no orders in range.`;
+  const money = s.byCurrency
+    .map((c) => `${fmt(c.totalAmount, c.currency)} ${cell(c.currency)} (${c.count})`)
+    .join(' · ');
+  const proto = s.byProtocol.map((p) => `${cell(p.protocol)}: ${p.count}`).join(' · ');
+  const stat = s.byStatus.map((x) => `${x.status}: ${x.count}`).join(' · ');
+  return [
+    `**${cell(merchantId)}** — ${s.count} orders`,
+    `**Gross**: ${money}`,
+    `**By protocol**: ${proto}`,
+    `**By status**: ${stat}`,
+  ].join('\n\n');
+};
+
 // MCP Apps card (a ui:// resource). Tools link to it via _meta.ui.resourceUri;
 // a UI-capable host (Claude Desktop) renders it as a widget, others fall back to
 // the text content. Same card the remote /mcp kit uses (built in apps/api/mcp-ui).
@@ -181,15 +214,39 @@ const TOOLS = [
   {
     name: 'list_orders',
     description:
-      "List this merchant's orders (what agents have paid you), newest first. Optional limit/offset.",
+      "List this merchant's orders (what agents have paid you), newest first. Filter by status / protocol / currency / date.",
     inputSchema: {
       type: 'object',
       properties: {
+        status: {
+          type: 'string',
+          enum: ['paid', 'pending_payment', 'refunded', 'disputed', 'canceled'],
+          description: 'order status (refunded/disputed surface Curless actions)',
+        },
+        protocol: { type: 'string', description: 'acp | x402 | a2a | ucp | …' },
+        currency: { type: 'string', description: 'e.g. USDC, EUR, USD' },
+        from: { type: 'string', description: 'ISO timestamp lower bound' },
+        to: { type: 'string', description: 'ISO timestamp upper bound' },
         limit: { type: 'number', description: 'max rows (default 50, cap 200)' },
         offset: { type: 'number', description: 'rows to skip' },
       },
     },
     _meta: UI_META,
+  },
+  {
+    name: 'get_summary',
+    description:
+      "This merchant's order roll-up: count + gross by currency + breakdowns by protocol/status. Same status/protocol/currency/date filters as list_orders.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string' },
+        protocol: { type: 'string' },
+        currency: { type: 'string' },
+        from: { type: 'string', description: 'ISO timestamp lower bound' },
+        to: { type: 'string', description: 'ISO timestamp upper bound' },
+      },
+    },
   },
   {
     name: 'get_balance',
@@ -219,7 +276,7 @@ const card = (markdown: string, structured: Record<string, unknown>) => ({
 });
 
 const server = new Server(
-  { name: 'agentbank-merchant', version: '0.0.19' },
+  { name: 'agentbank-merchant', version: '0.0.21' },
   { capabilities: { tools: {}, resources: {} } },
 );
 
@@ -240,11 +297,24 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (req.params.name === 'list_orders') {
       const limit = Math.min(Number(args.limit) || 50, 200);
       const offset = Math.max(Number(args.offset) || 0, 0);
-      const res = await api<OrdersResponse>(mPath(`/orders?limit=${limit}&offset=${offset}`));
+      const q = orderQuery(args);
+      const res = await api<OrdersResponse>(
+        mPath(`/orders?limit=${limit}&offset=${offset}${q ? `&${q}` : ''}`),
+      );
       return card(ordersMarkdown(MERCHANT ?? '', res.data), {
         merchantId: MERCHANT,
         orders: res.data, // raw (minor amounts) for the card
       });
+    }
+
+    if (req.params.name === 'get_summary') {
+      const q = orderQuery(args);
+      const s = await api<SummaryResponse>(mPath(`/summary${q ? `?${q}` : ''}`));
+      // Markdown-only (no card): the roll-up isn't an order list the card renders.
+      return {
+        content: [{ type: 'text' as const, text: summaryMarkdown(MERCHANT ?? '', s) }],
+        structuredContent: { merchantId: MERCHANT, mode: s.mode, summary: s },
+      };
     }
 
     if (req.params.name === 'get_balance') {

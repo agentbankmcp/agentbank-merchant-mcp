@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "agentbank-merchant",
   "display_name": "agentbank — Merchant",
-  "version": "0.0.22",
+  "version": "0.0.23",
   "description": "See your agentbank orders and live Curless wallet balance right in Claude. Authenticated by your Curless API key — no OAuth.",
   "long_description": "Merchant-side connector for agentbank. Tools: list_orders (orders agents have paid you) and get_balance (your live Curless wallet balance per currency — available / frozen). One-click install: enter your Curless API key + merchant id when prompted; the key never leaves your machine except to call agentbank.",
   "author": { "name": "robin" },

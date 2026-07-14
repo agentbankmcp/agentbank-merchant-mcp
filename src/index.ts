@@ -75,7 +75,18 @@ type OrderDetailResponse = {
 };
 
 // Minor-unit integer → exact decimal string (no currency suffix), per currency.
-const DECIMALS: Record<string, number> = { USD: 2, EUR: 2, USDC: 6, USDT: 6, EURC: 6 };
+// Minor-unit decimals per currency. RLUSD is 6-dp like the other stablecoins —
+// without it here an RLUSD amount (50000 = 0.05) would format as "500.00".
+const DECIMALS: Record<string, number> = {
+  USD: 2,
+  EUR: 2,
+  GBP: 2,
+  JPY: 0,
+  USDC: 6,
+  USDT: 6,
+  EURC: 6,
+  RLUSD: 6,
+};
 const fmt = (minor: number, currency: string): string => {
   const d = DECIMALS[currency] ?? 2;
   const neg = minor < 0;
@@ -175,7 +186,43 @@ const api = async <T>(path: string): Promise<T> => {
   return (await res.json()) as T;
 };
 
+const apiPost = async <T>(path: string, body?: unknown): Promise<T> => {
+  if (!TOKEN) throw new Error('set AGENTBANK_MERCHANT_TOKEN (your Curless API key)');
+  if (!MERCHANT) throw new Error('set AGENTBANK_MERCHANT_ID (e.g. 429488)');
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    throw new Error(`agentbank ${path} -> ${res.status}: ${await res.text().catch(() => '')}`);
+  }
+  return (await res.json()) as T;
+};
+
 const mPath = (suffix: string) => `/v1/merchant/${encodeURIComponent(MERCHANT ?? '')}${suffix}`;
+
+type RefundReq = {
+  id: string;
+  paymentIntentId: string;
+  amount: number;
+  currency: string;
+  reason?: string | null;
+  status: string;
+  decisionNote?: string | null;
+  createdAt?: string;
+};
+
+const refundQueueMarkdown = (rows: RefundReq[]): string => {
+  if (!rows.length) return 'No refund requests in range.';
+  return rows
+    .map(
+      (r) =>
+        `- \`${cell(r.id)}\` — ${fmt(r.amount, r.currency)} ${cell(r.currency)} · **${r.status}**` +
+        ` · order \`${cell(r.paymentIntentId)}\`${r.reason ? ` · ${cell(r.reason)}` : ''}`,
+    )
+    .join('\n');
+};
 
 // Build the optional order-filter query string (status/protocol/currency/date)
 // from a tool's args — forwarded verbatim to the gateway, which validates.
@@ -206,9 +253,21 @@ const summaryMarkdown = (merchantId: string, s: SummaryResponse): string => {
 // MCP Apps card (a ui:// resource). Tools link to it via _meta.ui.resourceUri;
 // a UI-capable host (Claude Desktop) renders it as a widget, others fall back to
 // the text content. Same card the remote /mcp kit uses (built in apps/api/mcp-ui).
-const CARD_URI = 'ui://agentbank-merchant/card-v18.html';
+const CARD_URI = 'ui://agentbank-merchant/card-v29.html';
 const CARD_MIME = 'text/html;profile=mcp-app';
 const UI_META = { ui: { resourceUri: CARD_URI }, 'ui/resourceUri': CARD_URI };
+
+// MCP tool annotations (host hints). Every tool acts only on the merchant's OWN
+// agentbank/Curless account — a closed, known system — so openWorldHint is false
+// throughout. Reads are read-only; a refund moves money (destructive), while a
+// rejection only records a decision (a write, but not destructive).
+const READ_ANNOTATIONS = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
+const REFUND_ANNOTATIONS = { readOnlyHint: false, destructiveHint: true, openWorldHint: false };
+const STATUS_WRITE_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  openWorldHint: false,
+};
 
 const TOOLS = [
   {
@@ -232,6 +291,7 @@ const TOOLS = [
       },
     },
     _meta: UI_META,
+    annotations: READ_ANNOTATIONS,
   },
   {
     name: 'get_summary',
@@ -248,12 +308,14 @@ const TOOLS = [
       },
     },
     _meta: UI_META,
+    annotations: READ_ANNOTATIONS,
   },
   {
     name: 'get_balance',
     description: "This merchant's live Curless wallet balance, per currency.",
     inputSchema: { type: 'object', properties: {} },
     _meta: UI_META,
+    annotations: READ_ANNOTATIONS,
   },
   {
     name: 'get_order',
@@ -265,6 +327,66 @@ const TOOLS = [
       required: ['orderId'],
     },
     _meta: UI_META,
+    annotations: READ_ANNOTATIONS,
+  },
+  {
+    name: 'list_refund_requests',
+    description:
+      "Buyers' refund requests on your orders. Default lists status=requested (the queue awaiting your decision); pass status to filter, or status=all for the full history.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['all', 'requested', 'approved', 'rejected', 'refunded', 'failed'],
+        },
+      },
+    },
+    _meta: UI_META,
+    annotations: READ_ANNOTATIONS,
+  },
+  {
+    name: 'approve_refund',
+    description:
+      'Approve a refund request → forwarded to Curless; the order refunds once Curless confirms. Pass the refund request id (rfr_…).',
+    inputSchema: {
+      type: 'object',
+      properties: { refundRequestId: { type: 'string', description: 'rfr_…' } },
+      required: ['refundRequestId'],
+    },
+    annotations: REFUND_ANNOTATIONS,
+  },
+  {
+    name: 'reject_refund',
+    description: 'Reject a refund request (optional note). Pass the refund request id (rfr_…).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        refundRequestId: { type: 'string', description: 'rfr_…' },
+        note: { type: 'string' },
+      },
+      required: ['refundRequestId'],
+    },
+    annotations: STATUS_WRITE_ANNOTATIONS,
+  },
+  {
+    name: 'refund_order',
+    description:
+      'Directly refund one of your orders (no buyer request needed). Pass the order id (ord_…); optional partial `amount` + reason. Omit `amount` for a FULL refund. If you DO pass a partial amount, it is in the ORDER’S minor units — read the order first (get_order / list_orders) to see its currency and total, because the units differ by currency.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orderId: { type: 'string', description: 'ord_… (from list_orders / get_order)' },
+        amount: {
+          type: 'number',
+          description:
+            "Partial refund in the ORDER'S minor units — the SAME units as the order's `amount` field shown by get_order/list_orders. The scale depends on the order's currency: 2 decimals for fiat (USD/EUR: 50000 = 500.00) but 6 decimals for stablecoins (USDC/USDT/RLUSD: 50000 = 0.05). So the same number means different money in different currencies — always check the order's currency first. Omit entirely for a full refund; must not exceed the order's remaining refundable amount.",
+        },
+        reason: { type: 'string', description: 'optional reason, shown in the audit trail' },
+      },
+      required: ['orderId'],
+    },
+    annotations: REFUND_ANNOTATIONS,
   },
 ];
 
@@ -277,7 +399,7 @@ const card = (markdown: string, structured: Record<string, unknown>) => ({
 });
 
 const server = new Server(
-  { name: 'agentbank-merchant', version: '0.0.25' },
+  { name: 'agentbank-merchant', version: '0.0.37' },
   { capabilities: { tools: {}, resources: {} } },
 );
 
@@ -349,6 +471,71 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         order: r.order,
         payment: r.payment,
       });
+    }
+
+    if (req.params.name === 'list_refund_requests') {
+      const raw = typeof args.status === 'string' && args.status ? args.status : 'requested';
+      // 'all' → omit the status query (the whole history); else filter by status.
+      const qs = raw === 'all' ? '' : `?status=${encodeURIComponent(raw)}`;
+      const res = await api<{ mode?: string; refundRequests: RefundReq[] }>(
+        mPath(`/refund-requests${qs}`),
+      );
+      // The card renders the queue (Approve / Reject on a pending row); markdown is
+      // the fallback for card-less hosts. `status` echoes the applied filter ('all'
+      // included) so the card highlights the matching chip.
+      return card(refundQueueMarkdown(res.refundRequests), {
+        merchantId: MERCHANT,
+        mode: res.mode,
+        status: raw,
+        refundRequests: res.refundRequests,
+      });
+    }
+
+    if (req.params.name === 'approve_refund') {
+      const rid = String(args.refundRequestId ?? '');
+      if (!rid) throw new Error('refundRequestId is required');
+      const { refundRequest: r } = await apiPost<{ refundRequest: RefundReq }>(
+        mPath(`/refund-requests/${encodeURIComponent(rid)}/approve`),
+      );
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Approved refund \`${cell(r.id)}\` — ${fmt(r.amount, r.currency)} ${cell(r.currency)} forwarded to Curless; the order refunds once Curless confirms.`,
+          },
+        ],
+      };
+    }
+
+    if (req.params.name === 'reject_refund') {
+      const rid = String(args.refundRequestId ?? '');
+      if (!rid) throw new Error('refundRequestId is required');
+      const note = typeof args.note === 'string' ? args.note : undefined;
+      const { refundRequest: r } = await apiPost<{ refundRequest: RefundReq }>(
+        mPath(`/refund-requests/${encodeURIComponent(rid)}/reject`),
+        { note },
+      );
+      return { content: [{ type: 'text', text: `Rejected refund \`${cell(r.id)}\`.` }] };
+    }
+
+    if (req.params.name === 'refund_order') {
+      const orderId = String(args.orderId ?? '');
+      if (!orderId) throw new Error('orderId is required');
+      const { refundRequest: r } = await apiPost<{ refundRequest: RefundReq }>(
+        mPath(`/orders/${encodeURIComponent(orderId)}/refund`),
+        {
+          amount: typeof args.amount === 'number' ? args.amount : undefined,
+          reason: typeof args.reason === 'string' ? args.reason : undefined,
+        },
+      );
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Refund opened for order \`${cell(orderId)}\` — ${fmt(r.amount, r.currency)} ${cell(r.currency)} forwarded to Curless.`,
+          },
+        ],
+      };
     }
 
     return { content: [{ type: 'text', text: `unknown tool: ${req.params.name}` }], isError: true };

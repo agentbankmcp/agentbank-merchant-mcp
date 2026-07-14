@@ -2,9 +2,9 @@
   "manifest_version": "0.3",
   "name": "agentbank-merchant",
   "display_name": "agentbank — Merchant",
-  "version": "0.0.25",
-  "description": "See your agentbank orders and live Curless wallet balance right in Claude. Authenticated by your Curless API key — no OAuth.",
-  "long_description": "Merchant-side connector for agentbank. Tools: list_orders (orders agents have paid you) and get_balance (your live Curless wallet balance per currency — available / frozen). One-click install: enter your Curless API key + merchant id when prompted; the key never leaves your machine except to call agentbank.",
+  "version": "0.0.40",
+  "description": "See your agentbank orders and live Curless wallet balance right in Claude, and handle refunds. Authenticated by your Curless API key — no OAuth.",
+  "long_description": "Merchant-side connector for agentbank. Orders: list_orders (orders agents have paid you, filter by status/protocol/currency/date), get_summary (count + gross by currency, breakdowns by protocol/status), get_balance (your live Curless wallet balance per currency — available / frozen), get_order (one order in full). Refunds: list_refund_requests (buyers' refund queue), approve_refund, reject_refund, refund_order (direct refund). One-click install: enter your Curless API key + merchant id when prompted; the key never leaves your machine except to call agentbank.",
   "author": { "name": "robin" },
   "license": "MIT",
   "repository": {
@@ -25,11 +25,14 @@
     }
   },
   "tools": [
-    { "name": "list_orders", "description": "List this merchant's orders, newest first" },
-    {
-      "name": "get_balance",
-      "description": "This merchant's live Curless wallet balance per currency (available / frozen)"
-    }
+    { "name": "list_orders", "description": "This merchant's orders (what agents have paid), newest first; filter by status/protocol/currency/date" },
+    { "name": "get_summary", "description": "Order roll-up: count + gross by currency + breakdowns by protocol/status" },
+    { "name": "get_balance", "description": "This merchant's live Curless wallet balance per currency (available / frozen)" },
+    { "name": "get_order", "description": "One order in full: line items + the card it was paid with" },
+    { "name": "list_refund_requests", "description": "Buyers' refund requests on your orders (the queue; filter by status)" },
+    { "name": "approve_refund", "description": "Approve a refund request → forwarded to Curless" },
+    { "name": "reject_refund", "description": "Decline a refund request (optional note)" },
+    { "name": "refund_order", "description": "Refund one of your orders directly (no buyer request needed)" }
   ],
   "user_config": {
     "merchant_token": {

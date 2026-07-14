@@ -65,6 +65,10 @@ type PaymentMethod = {
 type OrderDetail = Order & {
   protocol?: string;
   rail?: string | null;
+  // HOW Skyfire settled a KYAPay charge (the token's `stp`): 'coin' (a stablecoin
+  // moved between Skyfire-managed wallets) or 'card' (a tokenized card). Both arrive
+  // through the SAME charge call, so the rail ('skyfire') alone can't say which.
+  settlement?: string | null;
   paymentMethod?: PaymentMethod | null;
 };
 type OrderDetailResponse = {
@@ -155,7 +159,9 @@ const orderDetailMarkdown = (r: OrderDetailResponse): string => {
         .filter(Boolean)
         .join(' ')
     : '—';
-  const source = [o.protocol ? o.protocol.toUpperCase() : '', o.rail ?? pm?.provider]
+  // Skyfire's rail name says nothing — show HOW it settled (coin vs card) instead.
+  const rail = o.rail === 'skyfire' && o.settlement ? `Skyfire · ${o.settlement}` : o.rail;
+  const source = [o.protocol ? o.protocol.toUpperCase() : '', rail ?? pm?.provider]
     .filter(Boolean)
     .join(' · ');
   return [
@@ -253,7 +259,7 @@ const summaryMarkdown = (merchantId: string, s: SummaryResponse): string => {
 // MCP Apps card (a ui:// resource). Tools link to it via _meta.ui.resourceUri;
 // a UI-capable host (Claude Desktop) renders it as a widget, others fall back to
 // the text content. Same card the remote /mcp kit uses (built in apps/api/mcp-ui).
-const CARD_URI = 'ui://agentbank-merchant/card-v30.html';
+const CARD_URI = 'ui://agentbank-merchant/card-v31.html';
 const CARD_MIME = 'text/html;profile=mcp-app';
 const UI_META = { ui: { resourceUri: CARD_URI }, 'ui/resourceUri': CARD_URI };
 
@@ -399,7 +405,7 @@ const card = (markdown: string, structured: Record<string, unknown>) => ({
 });
 
 const server = new Server(
-  { name: 'agentbank-merchant', version: '0.0.41' },
+  { name: 'agentbank-merchant', version: '0.0.42' },
   { capabilities: { tools: {}, resources: {} } },
 );
 

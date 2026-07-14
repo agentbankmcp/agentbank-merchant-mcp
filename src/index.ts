@@ -399,7 +399,7 @@ const card = (markdown: string, structured: Record<string, unknown>) => ({
 });
 
 const server = new Server(
-  { name: 'agentbank-merchant', version: '0.0.37' },
+  { name: 'agentbank-merchant', version: '0.0.40' },
   { capabilities: { tools: {}, resources: {} } },
 );
 

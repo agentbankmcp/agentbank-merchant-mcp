@@ -33,6 +33,23 @@ Refunds:
 All eight render into the same MCP Apps card (orders list / detail / summary /
 wallet / refund queue) with a markdown fallback for hosts without the card.
 
+## Security & permissions
+
+- **Auth** — a single Curless API key (`AGENTBANK_MERCHANT_TOKEN`) via env: **no
+  OAuth, no browser flow**. The key stays on your machine and is sent only to
+  `https://mcp.curless.ai` over TLS to call agentbank on your behalf.
+- **Scope** — the key is **merchant-scoped**: it can only ever read and act on
+  **your own** merchant's data (your orders, your Curless wallet, your refund
+  queue). It can never see another merchant.
+- **Reads** — `list_orders` / `get_summary` / `get_order` (your order history +
+  line items) and `get_balance` (your live Curless wallet balance).
+- **Writes that move money** — `approve_refund` and `refund_order` **issue refunds
+  to buyers** (funds leave your Curless balance); `reject_refund` only records a
+  decision. These are the only state-changing tools — everything else is read-only.
+- **No local system access** — the server only makes outbound HTTPS calls to
+  agentbank. It does not read your filesystem, run shell commands, or touch
+  anything outside its own process.
+
 ## Install (Claude Desktop)
 
 **Desktop extension (.mcpb):** install `agentbank-merchant.mcpb` and enter your

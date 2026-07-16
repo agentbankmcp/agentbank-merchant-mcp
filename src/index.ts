@@ -69,6 +69,9 @@ type OrderDetail = Order & {
   // moved between Skyfire-managed wallets) or 'card' (a tokenized card). Both arrive
   // through the SAME charge call, so the rail ('skyfire') alone can't say which.
   settlement?: string | null;
+  // Minor units refunded so far (0 unless refunded/partially_refunded). A value
+  // below `amount` = a PARTIAL refund the status alone ("refunded") hides.
+  refundedAmount?: number;
   paymentMethod?: PaymentMethod | null;
 };
 type OrderDetailResponse = {
@@ -164,6 +167,10 @@ const orderDetailMarkdown = (r: OrderDetailResponse): string => {
   const source = [o.protocol ? o.protocol.toUpperCase() : '', rail ?? pm?.provider]
     .filter(Boolean)
     .join(' · ');
+  const refunded =
+    (o.refundedAmount ?? 0) > 0
+      ? `- ${(o.refundedAmount ?? 0) >= o.amount ? 'Refunded' : 'Partially refunded'}: ${fmt(o.refundedAmount ?? 0, o.currency)} ${o.currency}${(o.refundedAmount ?? 0) < o.amount ? ` of ${fmt(o.amount, o.currency)} ${o.currency}` : ''}`
+      : '';
   return [
     `**Order \`${o.id}\`** — ${fmt(o.amount, o.currency)} ${o.currency} · ${o.status ?? ''}`,
     o.createdAt ? fmtDate(o.createdAt) : '',
@@ -175,6 +182,7 @@ const orderDetailMarkdown = (r: OrderDetailResponse): string => {
     `- Card: ${cell(cardText)}`,
     source ? `- Source: ${cell(source)}` : '',
     pm?.reference ? `- Reference: \`${cell(String(pm.reference))}\`` : '',
+    refunded,
   ]
     .filter(Boolean)
     .join('\n');
@@ -259,7 +267,7 @@ const summaryMarkdown = (merchantId: string, s: SummaryResponse): string => {
 // MCP Apps card (a ui:// resource). Tools link to it via _meta.ui.resourceUri;
 // a UI-capable host (Claude Desktop) renders it as a widget, others fall back to
 // the text content. Same card the remote /mcp kit uses (built in apps/api/mcp-ui).
-const CARD_URI = 'ui://agentbank-merchant/card-v32.html';
+const CARD_URI = 'ui://agentbank-merchant/card-v33.html';
 const CARD_MIME = 'text/html;profile=mcp-app';
 const UI_META = { ui: { resourceUri: CARD_URI }, 'ui/resourceUri': CARD_URI };
 
@@ -405,7 +413,7 @@ const card = (markdown: string, structured: Record<string, unknown>) => ({
 });
 
 const server = new Server(
-  { name: 'agentbank-merchant', version: '0.0.43' },
+  { name: 'agentbank-merchant', version: '0.0.44' },
   { capabilities: { tools: {}, resources: {} } },
 );
 

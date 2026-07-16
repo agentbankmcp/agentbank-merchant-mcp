@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "agentbank-merchant",
   "display_name": "agentbank — Merchant",
-  "version": "0.0.43",
+  "version": "0.0.44",
   "description": "See your agentbank orders and live Curless wallet balance right in Claude, and handle refunds. Authenticated by your Curless API key — no OAuth.",
   "long_description": "Merchant-side connector for agentbank. Orders: list_orders (orders agents have paid you, filter by status/protocol/currency/date), get_summary (count + gross by currency, breakdowns by protocol/status), get_balance (your live Curless wallet balance per currency — available / frozen), get_order (one order in full). Refunds: list_refund_requests (buyers' refund queue), approve_refund, reject_refund, refund_order (direct refund). One-click install: enter your Curless API key + merchant id when prompted; the key never leaves your machine except to call agentbank.",
   "author": { "name": "robin" },

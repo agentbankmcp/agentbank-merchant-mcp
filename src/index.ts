@@ -51,7 +51,12 @@ type SummaryResponse = {
 };
 // Balance = the live Curless wallet (Curless holds the money + reports it). We
 // no longer surface our own ledger-derived balance.
-type BalanceResponse = { mode: string; curlessWallet: WalletLine[] | null };
+type BalanceResponse = {
+  mode: string;
+  curlessWallet: WalletLine[] | null;
+  /** Present only when the read FAILED — never conflated with an empty wallet. */
+  walletUnavailable?: 'not-configured' | 'unauthorized' | 'unavailable';
+};
 
 type PaymentMethod = {
   type?: string;
@@ -129,7 +134,26 @@ const ordersMarkdown = (merchantId: string, orders: Order[]): string => {
   ].join('\n');
 };
 
-const walletMarkdown = (merchantId: string, mode: string, wallet: WalletLine[]): string => {
+// A failed read is not a balance of zero. This is the surface a merchant checks
+// to see whether their money arrived, so a blank reads as an answer — and each
+// reason gets its own next step, because they differ.
+const WALLET_UNAVAILABLE: Record<string, string> = {
+  unauthorized:
+    'Curless is refusing our credentials, so the balance could not be read — this is what a displaced or expired login looks like. Signing in again reissues them. **Your balance is unknown, not zero.**',
+  unavailable:
+    'Curless could not be reached, so the balance could not be read. Nothing is wrong with your account; try again shortly. **Your balance is unknown, not zero.**',
+  'not-configured': 'No Curless wallet is connected to this merchant yet.',
+};
+
+const walletMarkdown = (
+  merchantId: string,
+  mode: string,
+  wallet: WalletLine[],
+  unavailable?: string,
+): string => {
+  if (unavailable) {
+    return `**${merchantId}** (${mode} mode) — ${WALLET_UNAVAILABLE[unavailable] ?? WALLET_UNAVAILABLE.unavailable}`;
+  }
   if (wallet.length === 0) return `**${merchantId}** (${mode} mode) — no wallet balance yet.`;
   const rows = wallet.map(
     (b) => `| ${b.currency} | **${fmt(b.available, b.currency)}** | ${fmt(b.frozen, b.currency)} |`,
@@ -267,7 +291,8 @@ const summaryMarkdown = (merchantId: string, s: SummaryResponse): string => {
 // MCP Apps card (a ui:// resource). Tools link to it via _meta.ui.resourceUri;
 // a UI-capable host (Claude Desktop) renders it as a widget, others fall back to
 // the text content. Same card the remote /mcp kit uses (built in apps/api/mcp-ui).
-const CARD_URI = 'ui://agentbank-merchant/card-v33.html';
+const CARD_URI_PREFIX = 'ui://agentbank-merchant/';
+const CARD_URI = `${CARD_URI_PREFIX}card-v39.html`;
 const CARD_MIME = 'text/html;profile=mcp-app';
 const UI_META = { ui: { resourceUri: CARD_URI }, 'ui/resourceUri': CARD_URI };
 
@@ -423,9 +448,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
 server.setRequestHandler(ListResourcesRequestSchema, async () => ({
   resources: [{ uri: CARD_URI, name: 'Merchant card', mimeType: CARD_MIME }],
 }));
+// Any URI in this namespace gets the CURRENT card, and the answer echoes the
+// URI that was asked for.
+//
+// Bumping the URI is how a host is told the card changed — but a host that
+// still holds the old one then asks for a resource we refuse to serve, and
+// ChatGPT shows the buyer "Failed to fetch template" until the connector is
+// deleted and re-added. Nothing is broken there except our own refusal.
+//
+// Echoing the requested URI rather than the current one: a client that asked
+// for v12 and got v39 back has an answer to a question it did not ask, and
+// some will discard it.
 server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
-  if (req.params.uri !== CARD_URI) throw new Error(`unknown resource: ${req.params.uri}`);
-  return { contents: [{ uri: CARD_URI, mimeType: CARD_MIME, text: MERCHANT_CARD_HTML }] };
+  const asked = String(req.params.uri ?? '');
+  if (!asked.startsWith(CARD_URI_PREFIX)) throw new Error(`unknown resource: ${asked}`);
+  return { contents: [{ uri: asked, mimeType: CARD_MIME, text: MERCHANT_CARD_HTML }] };
 });
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
@@ -462,9 +499,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       // agentbank ledger, no channel. structuredContent carries raw minor units
       // for the card; the markdown is the formatted fallback.
       const wallet = b.curlessWallet ?? [];
-      return card(walletMarkdown(MERCHANT ?? '', b.mode, wallet), {
+      return card(walletMarkdown(MERCHANT ?? '', b.mode, wallet, b.walletUnavailable), {
         merchantId: MERCHANT,
         mode: b.mode,
+        ...(b.walletUnavailable ? { walletUnavailable: b.walletUnavailable } : {}),
         curlessWallet: wallet.map((x) => ({
           currency: x.currency,
           available: x.available,
